@@ -138,3 +138,7 @@ don't want to install [RES4LYF](https://github.com/ClownsharkBatwing/RES4LYF).
 beta57 is the beta sigma schedule with `alpha=0.5, beta=0.7`, popularized by
 RES4LYF. It appears in every scheduler dropdown (KSampler, BasicScheduler, …)
 and behaves like a built-in.
+
+## License
+
+[GPL-3.0](LICENSE)
