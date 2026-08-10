@@ -19,6 +19,8 @@ Restart ComfyUI. No extra Python dependencies are required.
 
 ### Load Image & Crop
 
+![Load Image & Crop node with an active crop selection](assets/loadandcrop.jpg)
+
 A Load Image with an interactive crop editor drawn directly on the node:
 
 - **Drag** on the image to draw a crop area.
@@ -130,11 +132,9 @@ skipped over, so several optional paths fan back into one guaranteed value.
 
 ## beta57 scheduler
 
-Loading the pack registers **beta57** — the beta sigma schedule with
-`alpha=0.5, beta=0.7`, popularized by [RES4LYF](https://github.com/ClownsharkBatwing/RES4LYF) —
-into ComfyUI's scheduler registry. It appears in every scheduler dropdown
-(KSampler, BasicScheduler, …) and behaves like a built-in. Registration is
-guarded, so it coexists with RES4LYF if that pack is also installed.
+This nodepack automatically adds **beta57** for you if you don't have or
+don't want to install [RES4LYF](https://github.com/ClownsharkBatwing/RES4LYF).
 
-Note: workflows saved with `beta57` need a pack that provides it (this one or
-RES4LYF) to run on other installs.
+beta57 is the beta sigma schedule with `alpha=0.5, beta=0.7`, popularized by
+RES4LYF. It appears in every scheduler dropdown (KSampler, BasicScheduler, …)
+and behaves like a built-in.

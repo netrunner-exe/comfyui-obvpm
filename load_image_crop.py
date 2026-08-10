@@ -52,6 +52,11 @@ class LoadImageCrop:
         "0, the output is scaled down to fit within it (aspect preserved)."
     )
 
+    OUTPUT_TOOLTIPS = (
+        "The loaded image, cropped to the selection (if any) and scaled down to max_megapixels (if set).",
+        "Mask from the image's alpha channel, cropped and scaled the same way.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         input_dir = folder_paths.get_input_directory()
@@ -59,9 +64,18 @@ class LoadImageCrop:
         files = folder_paths.filter_files_content_types(files, ["image"])
         return {
             "required": {
-                "image": (sorted(files), {"image_upload": True}),
-                "crop": ("STRING", {"default": ""}),
-                "max_megapixels": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 128.0, "step": 0.01}),
+                "image": (sorted(files), {
+                    "image_upload": True,
+                    "tooltip": "The image file to load. Upload, drag & drop, or pick an existing input file.",
+                }),
+                "crop": ("STRING", {
+                    "default": "",
+                    "tooltip": "Managed by the crop editor on the node — no need to edit by hand.",
+                }),
+                "max_megapixels": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 128.0, "step": 0.01,
+                    "tooltip": "If the selected image area is larger than this many megapixels, then it is downscaled to it for output. Set to 0 to disable downscaling.",
+                }),
             }
         }
 

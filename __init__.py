@@ -40,14 +40,24 @@ class OptionalGateBase:
         "even in mute mode, so it can drive a Lazy Switch boolean."
     )
 
+    OUTPUT_TOOLTIPS = (
+        "The input passed through. When the input is empty: blocked (mute) or None (bypass).",
+        "True when an input is connected. Stays live even in mute mode.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "on_empty": (["mute", "bypass"], {"default": "mute"}),
+                "on_empty": (["mute", "bypass"], {
+                    "default": "mute",
+                    "tooltip": "What downstream sees when no input is connected: mute skips every downstream node, bypass outputs None.",
+                }),
             },
             "optional": {
-                "input": (cls.TYPE, {}),
+                "input": (cls.TYPE, {
+                    "tooltip": "The value to pass through. May be left unconnected.",
+                }),
             },
         }
 
@@ -88,11 +98,17 @@ class ModelOptionalGate(OptionalGateBase):
         "wired in."
     )
 
+    OUTPUT_TOOLTIPS = (
+        "The model passed through. Blocked when nothing is connected.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "optional": {
-                "input": (cls.TYPE, {}),
+                "input": (cls.TYPE, {
+                    "tooltip": "The model to pass through. Leave unconnected to skip everything downstream.",
+                }),
             },
         }
 
@@ -136,15 +152,28 @@ class LazySwitch:
         "from a gate's 'present' output to switch automatically."
     )
 
+    OUTPUT_TOOLTIPS = (
+        "The selected side's value. None when the selected side is unconnected.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boolean": ("BOOLEAN", {"default": True}),
+                "boolean": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Selects which side to execute and output: true = on_true, false = on_false.",
+                }),
             },
             "optional": {
-                "on_false": (ANY, {"lazy": True}),
-                "on_true": (ANY, {"lazy": True}),
+                "on_false": (ANY, {
+                    "lazy": True,
+                    "tooltip": "Output when boolean is false. Only executes while selected; may be left unconnected.",
+                }),
+                "on_true": (ANY, {
+                    "lazy": True,
+                    "tooltip": "Output when boolean is true. Only executes while selected; may be left unconnected.",
+                }),
             },
             "hidden": {
                 "dynprompt": "DYNPROMPT",
@@ -180,14 +209,23 @@ class MuteGate:
         "work as well, use a Lazy Switch instead."
     )
 
+    OUTPUT_TOOLTIPS = (
+        "The input passed through. Blocked while mute is true.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "mute": ("BOOLEAN", {"default": False}),
+                "mute": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "When true, every node downstream of this gate is skipped. Connectable, so it can be driven by logic.",
+                }),
             },
             "optional": {
-                "input": (ANY, {}),
+                "input": (ANY, {
+                    "tooltip": "Any value to pass through. Its upstream nodes still run even when muted.",
+                }),
             },
         }
 
@@ -213,10 +251,16 @@ class LazySwitchMultiBase:
         optional = {}
         for side in ("false", "true"):
             for i in range(1, cls.COUNT + 1):
-                optional[f"on_{side}_value_{i}"] = (ANY, {"lazy": True})
+                optional[f"on_{side}_value_{i}"] = (ANY, {
+                    "lazy": True,
+                    "tooltip": f"Output as value_{i} when boolean is {side}. Only executes while selected; may be left unconnected.",
+                })
         return {
             "required": {
-                "boolean": ("BOOLEAN", {"default": True}),
+                "boolean": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Selects which side to execute and output: true = the on_true_value inputs, false = the on_false_value inputs.",
+                }),
             },
             "optional": optional,
             "hidden": {
@@ -245,16 +289,21 @@ class LazySwitchMultiBase:
         )
 
 
+_LAZY_VALUE_TOOLTIP = "The selected side's value for this slot. None when that slot is unconnected."
+
+
 class LazySwitch2(LazySwitchMultiBase):
     COUNT = 2
     RETURN_TYPES = (ANY, ANY)
     RETURN_NAMES = ("value_1", "value_2")
+    OUTPUT_TOOLTIPS = (_LAZY_VALUE_TOOLTIP,) * 2
 
 
 class LazySwitch3(LazySwitchMultiBase):
     COUNT = 3
     RETURN_TYPES = (ANY, ANY, ANY)
     RETURN_NAMES = ("value_1", "value_2", "value_3")
+    OUTPUT_TOOLTIPS = (_LAZY_VALUE_TOOLTIP,) * 3
 
 
 class DownscaleImageToMegapixels:
@@ -269,15 +318,27 @@ class DownscaleImageToMegapixels:
         "With no image connected it bypasses (outputs None)."
     )
 
+    OUTPUT_TOOLTIPS = (
+        "The image, scaled down if it exceeded the megapixel target. None when no image is connected.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "megapixels": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 128.0, "step": 0.01}),
-                "method": (["lanczos", "area", "bicubic", "bilinear", "nearest-exact"], {"default": "lanczos"}),
+                "megapixels": ("FLOAT", {
+                    "default": 1.0, "min": 0.01, "max": 128.0, "step": 0.01,
+                    "tooltip": "Maximum output size in megapixels (1.0 = 1024x1024 pixels). Larger images are scaled down to fit; smaller ones pass through untouched.",
+                }),
+                "method": (["lanczos", "area", "bicubic", "bilinear", "nearest-exact"], {
+                    "default": "lanczos",
+                    "tooltip": "Resampling filter used when downscaling.",
+                }),
             },
             "optional": {
-                "image": ("IMAGE", {}),
+                "image": ("IMAGE", {
+                    "tooltip": "The image to downscale. Leave unconnected to output None (bypass).",
+                }),
             },
         }
 
@@ -310,15 +371,25 @@ class FirstValueBase:
         "back into one guaranteed value."
     )
 
+    OUTPUT_TOOLTIPS = (
+        "The first connected input that has a value, or the fallback.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         name = cls.TYPE.lower()
         return {
             "required": {
-                "fallback": (cls.TYPE, cls.FALLBACK_OPTS),
+                "fallback": (cls.TYPE, {
+                    **cls.FALLBACK_OPTS,
+                    "tooltip": "Output when none of the inputs carry a value.",
+                }),
             },
             "optional": {
-                f"{name}{i}": (cls.TYPE, {"forceInput": True})
+                f"{name}{i}": (cls.TYPE, {
+                    "forceInput": True,
+                    "tooltip": f"Candidate {i}: used when it is the first connected input with a value. Bypassed (None) inputs are skipped.",
+                })
                 for i in range(1, cls.SLOTS + 1)
             },
         }
