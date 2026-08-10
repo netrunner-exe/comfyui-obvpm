@@ -1,0 +1,135 @@
+"""Load Image & Crop: LoadImage plus an interactive crop rectangle.
+
+The frontend (web/load_image_crop.js) shows the picked image on the node
+and lets the user drag/resize a crop area. The selection is stored in the
+hidden "crop" string widget as JSON with normalized coordinates
+{"x":0..1,"y":0..1,"w":0..1,"h":0..1}. Empty string means no crop.
+"""
+
+import hashlib
+import json
+import os
+
+import numpy as np
+import torch
+from PIL import Image, ImageOps, ImageSequence
+
+import folder_paths
+import node_helpers
+
+
+def _parse_crop(crop, width, height):
+    """Return (x0, y0, x1, y1) pixel box, or None for full image."""
+    if not crop:
+        return None
+    try:
+        data = json.loads(crop)
+        x = float(data["x"])
+        y = float(data["y"])
+        w = float(data["w"])
+        h = float(data["h"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    x0 = max(0, min(width - 1, round(x * width)))
+    y0 = max(0, min(height - 1, round(y * height)))
+    x1 = max(x0 + 1, min(width, round((x + w) * width)))
+    y1 = max(y0 + 1, min(height, round((y + h) * height)))
+    if x0 == 0 and y0 == 0 and x1 == width and y1 == height:
+        return None
+    return (x0, y0, x1, y1)
+
+
+class LoadImageCrop:
+    CATEGORY = "obvpm/image"
+    FUNCTION = "load"
+    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_NAMES = ("image", "mask")
+    DESCRIPTION = (
+        "Loads an image and crops it to the area selected interactively on "
+        "the node's preview. Drag to draw the crop area, drag inside it to "
+        "move, drag its corners to resize, click to clear. With no crop "
+        "drawn the full image is output. If max_megapixels is greater than "
+        "0, the output is scaled down to fit within it (aspect preserved)."
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        input_dir = folder_paths.get_input_directory()
+        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+        files = folder_paths.filter_files_content_types(files, ["image"])
+        return {
+            "required": {
+                "image": (sorted(files), {"image_upload": True}),
+                "crop": ("STRING", {"default": ""}),
+                "max_megapixels": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 128.0, "step": 0.01}),
+            }
+        }
+
+    def load(self, image, crop="", max_megapixels=0.0):
+        image_path = folder_paths.get_annotated_filepath(image)
+        img = node_helpers.pillow(Image.open, image_path)
+
+        output_images = []
+        output_masks = []
+        w, h = None, None
+
+        for i in ImageSequence.Iterator(img):
+            i = node_helpers.pillow(ImageOps.exif_transpose, i)
+
+            frame = i.convert("RGB")
+            if len(output_images) == 0:
+                w, h = frame.size
+            if frame.size != (w, h):
+                continue
+
+            frame = np.array(frame).astype(np.float32) / 255.0
+            frame = torch.from_numpy(frame)[None,]
+            if "A" in i.getbands():
+                mask = np.array(i.getchannel("A")).astype(np.float32) / 255.0
+                mask = 1.0 - torch.from_numpy(mask)
+            else:
+                mask = torch.zeros((h, w), dtype=torch.float32)
+            output_images.append(frame)
+            output_masks.append(mask.unsqueeze(0))
+
+        images = torch.cat(output_images, dim=0)
+        masks = torch.cat(output_masks, dim=0)
+
+        box = _parse_crop(crop, images.shape[2], images.shape[1])
+        if box is not None:
+            x0, y0, x1, y1 = box
+            images = images[:, y0:y1, x0:x1, :]
+            masks = masks[:, y0:y1, x0:x1]
+
+        if max_megapixels > 0:
+            import comfy.utils
+
+            height, width = images.shape[1], images.shape[2]
+            target = max_megapixels * 1024 * 1024
+            current = width * height
+            if current > target:
+                scale = (target / current) ** 0.5
+                new_width = max(1, round(width * scale))
+                new_height = max(1, round(height * scale))
+                images = comfy.utils.common_upscale(
+                    images.movedim(-1, 1), new_width, new_height, "lanczos", "disabled"
+                ).movedim(1, -1)
+                masks = comfy.utils.common_upscale(
+                    masks.unsqueeze(1), new_width, new_height, "bilinear", "disabled"
+                ).squeeze(1)
+
+        return (images, masks)
+
+    @classmethod
+    def IS_CHANGED(cls, image, crop="", max_megapixels=0.0):
+        image_path = folder_paths.get_annotated_filepath(image)
+        m = hashlib.sha256()
+        with open(image_path, "rb") as f:
+            m.update(f.read())
+        return m.digest().hex()
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, image, crop="", max_megapixels=0.0):
+        if not folder_paths.exists_annotated_filepath(image):
+            return "Invalid image file: {}".format(image)
+        return True
