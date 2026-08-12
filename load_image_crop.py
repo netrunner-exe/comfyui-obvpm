@@ -29,7 +29,7 @@ ASPECT_RATIOS = [
     "16:9 (Widescreen)",
     "21:9 (Ultrawide)",
 ]
-DEFAULT_ASPECT_RATIO = "1:1 (Square)"
+DEFAULT_ASPECT_RATIO = "Freeform"
 
 
 def _parse_crop(crop, width, height):

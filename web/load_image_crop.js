@@ -16,7 +16,7 @@ const ASPECT_RATIO_OPTIONS = [
     ["16:9 (Widescreen)", 16 / 9],
     ["21:9 (Ultrawide)", 21 / 9],
 ];
-const DEFAULT_ASPECT_RATIO = "1:1 (Square)";
+const DEFAULT_ASPECT_RATIO = "Freeform";
 const ASPECT_RATIO_MAP = new Map(ASPECT_RATIO_OPTIONS);
 
 const DEBUG = false;
@@ -132,8 +132,9 @@ app.registerExtension({
             }
 
             function selectedAspectRatio() {
-                return ASPECT_RATIO_MAP.get(aspectWidget?.value)
-                    ?? ASPECT_RATIO_MAP.get(DEFAULT_ASPECT_RATIO);
+                return ASPECT_RATIO_MAP.has(aspectWidget?.value)
+                    ? ASPECT_RATIO_MAP.get(aspectWidget.value)
+                    : ASPECT_RATIO_MAP.get(DEFAULT_ASPECT_RATIO);
             }
 
             function aspectBox(anchorX, anchorY, pointerX, pointerY, bounds) {
@@ -583,6 +584,13 @@ app.registerExtension({
                     aspectWidget.value = DEFAULT_ASPECT_RATIO;
                 }
             }
+            function normalizeMaxMegapixelsWidget() {
+                if (!mpWidget) return;
+                const mp = Number(mpWidget.value);
+                if (!Number.isFinite(mp)) {
+                    mpWidget.value = 0;
+                }
+            }
             function migrateShiftedWidgetValues() {
                 if (!aspectWidget || ASPECT_RATIO_MAP.has(aspectWidget.value)) return;
                 const shiftedMp = Number(aspectWidget.value);
@@ -590,7 +598,9 @@ app.registerExtension({
                     mpWidget.value = shiftedMp;
                 }
                 normalizeAspectWidget();
+                normalizeMaxMegapixelsWidget();
             }
+            normalizeMaxMegapixelsWidget();
             migrateShiftedWidgetValues();
 
             if (aspectWidget) {
@@ -610,6 +620,7 @@ app.registerExtension({
                 const prevMpCallback = mpWidget.callback;
                 mpWidget.callback = function () {
                     const r = prevMpCallback?.apply(this, arguments);
+                    normalizeMaxMegapixelsWidget();
                     editorWidget.triggerDraw?.();
                     node.setDirtyCanvas(true, true);
                     return r;
@@ -675,6 +686,7 @@ app.registerExtension({
             node.onConfigure = function () {
                 const r = prevOnConfigure?.apply(this, arguments);
                 migrateShiftedWidgetValues();
+                normalizeMaxMegapixelsWidget();
                 try {
                     const saved = cropWidget.value ? JSON.parse(cropWidget.value) : null;
                     state.rect = saved && saved.w > 0 && saved.h > 0 ? saved : null;
