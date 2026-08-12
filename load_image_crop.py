@@ -18,6 +18,20 @@ import folder_paths
 import node_helpers
 
 
+ASPECT_RATIOS = [
+    "Freeform",
+    "1:1 (Square)",
+    "2:3 (Portrait Photo)",
+    "3:2 (Photo)",
+    "3:4 (Portrait Standard)",
+    "4:3 (Standard)",
+    "9:16 (Portrait Widescreen)",
+    "16:9 (Widescreen)",
+    "21:9 (Ultrawide)",
+]
+DEFAULT_ASPECT_RATIO = "1:1 (Square)"
+
+
 def _parse_crop(crop, width, height):
     """Return (x0, y0, x1, y1) pixel box, or None for full image."""
     if not crop:
@@ -72,6 +86,10 @@ class LoadImageCrop:
                     "default": "",
                     "tooltip": "Managed by the crop editor on the node — no need to edit by hand.",
                 }),
+                "aspect_ratio": (ASPECT_RATIOS, {
+                    "default": DEFAULT_ASPECT_RATIO,
+                    "tooltip": "Locks the crop selection to the selected aspect ratio.",
+                }),
                 "max_megapixels": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 128.0, "step": 0.01,
                     "tooltip": "If the selected image area is larger than this many megapixels, then it is downscaled to it for output. Set to 0 to disable downscaling.",
@@ -79,7 +97,7 @@ class LoadImageCrop:
             }
         }
 
-    def load(self, image, crop="", max_megapixels=0.0):
+    def load(self, image, crop="", aspect_ratio=DEFAULT_ASPECT_RATIO, max_megapixels=0.0):
         image_path = folder_paths.get_annotated_filepath(image)
         img = node_helpers.pillow(Image.open, image_path)
 
@@ -135,7 +153,7 @@ class LoadImageCrop:
         return (images, masks)
 
     @classmethod
-    def IS_CHANGED(cls, image, crop="", max_megapixels=0.0):
+    def IS_CHANGED(cls, image, crop="", aspect_ratio=DEFAULT_ASPECT_RATIO, max_megapixels=0.0):
         image_path = folder_paths.get_annotated_filepath(image)
         m = hashlib.sha256()
         with open(image_path, "rb") as f:
@@ -143,7 +161,7 @@ class LoadImageCrop:
         return m.digest().hex()
 
     @classmethod
-    def VALIDATE_INPUTS(cls, image, crop="", max_megapixels=0.0):
+    def VALIDATE_INPUTS(cls, image, crop="", aspect_ratio=DEFAULT_ASPECT_RATIO, max_megapixels=0.0):
         if not folder_paths.exists_annotated_filepath(image):
             return "Invalid image file: {}".format(image)
         return True

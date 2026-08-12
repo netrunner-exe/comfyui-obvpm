@@ -5,6 +5,19 @@ const MARGIN = 10; // node-space px, matches litegraph widget margin
 const HANDLE = 8; // node-space px hit radius for corner handles
 const MIN_SEL = 6; // drags smaller than this (node-space px) clear the crop
 const MIN_EDITOR_H = 80; // minimum height of the crop editor area
+const ASPECT_RATIO_OPTIONS = [
+    ["Freeform", null],
+    ["1:1 (Square)", 1 / 1],
+    ["2:3 (Portrait Photo)", 2 / 3],
+    ["3:2 (Photo)", 3 / 2],
+    ["3:4 (Portrait Standard)", 3 / 4],
+    ["4:3 (Standard)", 4 / 3],
+    ["9:16 (Portrait Widescreen)", 9 / 16],
+    ["16:9 (Widescreen)", 16 / 9],
+    ["21:9 (Ultrawide)", 21 / 9],
+];
+const DEFAULT_ASPECT_RATIO = "1:1 (Square)";
+const ASPECT_RATIO_MAP = new Map(ASPECT_RATIO_OPTIONS);
 
 const DEBUG = false;
 function dbg(...args) {
@@ -41,6 +54,7 @@ app.registerExtension({
             const node = this;
             const imageWidget = node.widgets.find((w) => w.name === "image");
             const cropWidget = node.widgets.find((w) => w.name === "crop");
+            const aspectWidget = node.widgets.find((w) => w.name === "aspect_ratio");
 
             // The crop JSON widget is managed by the editor below.
             // widget.hidden hides it in the canvas renderer; options.hidden
@@ -115,6 +129,92 @@ app.registerExtension({
                 const x1 = Math.max(x0 + 1, Math.min(iw, Math.round((r.x + r.w) * iw)));
                 const y1 = Math.max(y0 + 1, Math.min(ih, Math.round((r.y + r.h) * ih)));
                 return [x1 - x0, y1 - y0];
+            }
+
+            function selectedAspectRatio() {
+                return ASPECT_RATIO_MAP.get(aspectWidget?.value)
+                    ?? ASPECT_RATIO_MAP.get(DEFAULT_ASPECT_RATIO);
+            }
+
+            function aspectBox(anchorX, anchorY, pointerX, pointerY, bounds) {
+                const { bx, by, bw, bh } = bounds;
+                const ratio = selectedAspectRatio();
+                const dx = pointerX - anchorX;
+                const dy = pointerY - anchorY;
+                if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return null;
+                if (ratio === null) {
+                    const x0 = Math.min(anchorX, pointerX);
+                    const y0 = Math.min(anchorY, pointerY);
+                    const x1 = Math.max(anchorX, pointerX);
+                    const y1 = Math.max(anchorY, pointerY);
+                    if (x1 - x0 < MIN_SEL || y1 - y0 < MIN_SEL) return null;
+                    return { x0, y0, x1, y1 };
+                }
+
+                const sx = dx < 0 ? -1 : 1;
+                const sy = dy < 0 ? -1 : 1;
+                const maxW = sx < 0 ? anchorX - bx : bx + bw - anchorX;
+                const maxH = sy < 0 ? anchorY - by : by + bh - anchorY;
+                let w = Math.abs(dx);
+                let h = Math.abs(dy);
+
+                if (h < 1 || (w >= 1 && w / h >= ratio)) {
+                    h = w / ratio;
+                } else {
+                    w = h * ratio;
+                }
+                if (w > maxW) {
+                    w = maxW;
+                    h = w / ratio;
+                }
+                if (h > maxH) {
+                    h = maxH;
+                    w = h * ratio;
+                }
+                if (w < MIN_SEL || h < MIN_SEL) return null;
+
+                const x0 = sx < 0 ? anchorX - w : anchorX;
+                const y0 = sy < 0 ? anchorY - h : anchorY;
+                return {
+                    x0,
+                    y0,
+                    x1: sx < 0 ? anchorX : anchorX + w,
+                    y1: sy < 0 ? anchorY : anchorY + h,
+                };
+            }
+
+            function setRectFromBox(box, bounds) {
+                const { bx, by, bw, bh } = bounds;
+                state.rect = {
+                    x: (Math.min(box.x0, box.x1) - bx) / bw,
+                    y: (Math.min(box.y0, box.y1) - by) / bh,
+                    w: Math.abs(box.x1 - box.x0) / bw,
+                    h: Math.abs(box.y1 - box.y0) / bh,
+                };
+            }
+
+            function fitCurrentRectToAspect() {
+                if (!state.img || !state.rect) return;
+                if (selectedAspectRatio() === null) return;
+                const r = state.rect;
+                const normRatio = selectedAspectRatio() * state.img.height / state.img.width;
+                const cx = r.x + r.w / 2;
+                const cy = r.y + r.h / 2;
+                let w = r.w;
+                let h = r.h;
+                if (w / h > normRatio) {
+                    w = h * normRatio;
+                } else {
+                    h = w / normRatio;
+                }
+                w = Math.max(0.001, Math.min(1, w));
+                h = Math.max(0.001, Math.min(1, h));
+                state.rect = {
+                    x: Math.max(0, Math.min(1 - w, cx - w / 2)),
+                    y: Math.max(0, Math.min(1 - h, cy - h / 2)),
+                    w,
+                    h,
+                };
             }
 
             // Returns [w, h] after the max_megapixels cap, or null if it
@@ -358,18 +458,14 @@ app.registerExtension({
                             drag.moved = true;
                         }
                         if (drag.mode === "new") {
-                            const x0 = clampX(Math.min(drag.startX, px));
-                            const y0 = clampY(Math.min(drag.startY, py));
-                            const x1 = clampX(Math.max(drag.startX, px));
-                            const y1 = clampY(Math.max(drag.startY, py));
-                            if (x1 - x0 >= MIN_SEL && y1 - y0 >= MIN_SEL) {
-                                state.rect = {
-                                    x: (x0 - bx) / bw,
-                                    y: (y0 - by) / bh,
-                                    w: (x1 - x0) / bw,
-                                    h: (y1 - y0) / bh,
-                                };
-                            }
+                            const box = aspectBox(
+                                drag.startX,
+                                drag.startY,
+                                clampX(px),
+                                clampY(py),
+                                state.box
+                            );
+                            if (box) setRectFromBox(box, state.box);
                         } else if (drag.mode === "move" && state.rect) {
                             let nx = (clampX(px - drag.offX) - bx) / bw;
                             let ny = (clampY(py - drag.offY) - by) / bh;
@@ -379,22 +475,25 @@ app.registerExtension({
                             state.rect.y = ny;
                         } else if (drag.mode === "resize" && state.rect) {
                             const r = state.rect;
-                            let x0 = bx + r.x * bw;
-                            let y0 = by + r.y * bh;
-                            let x1 = x0 + r.w * bw;
-                            let y1 = y0 + r.h * bh;
-                            if (drag.corner.includes("w")) x0 = clampX(px);
-                            if (drag.corner.includes("e")) x1 = clampX(px);
-                            if (drag.corner.includes("n")) y0 = clampY(py);
-                            if (drag.corner.includes("s")) y1 = clampY(py);
-                            if (Math.abs(x1 - x0) >= MIN_SEL && Math.abs(y1 - y0) >= MIN_SEL) {
-                                state.rect = {
-                                    x: (Math.min(x0, x1) - bx) / bw,
-                                    y: (Math.min(y0, y1) - by) / bh,
-                                    w: Math.abs(x1 - x0) / bw,
-                                    h: Math.abs(y1 - y0) / bh,
-                                };
-                            }
+                            const x0 = bx + r.x * bw;
+                            const y0 = by + r.y * bh;
+                            const x1 = x0 + r.w * bw;
+                            const y1 = y0 + r.h * bh;
+                            const anchors = {
+                                nw: [x1, y1],
+                                ne: [x0, y1],
+                                sw: [x1, y0],
+                                se: [x0, y0],
+                            };
+                            const [anchorX, anchorY] = anchors[drag.corner];
+                            const box = aspectBox(
+                                anchorX,
+                                anchorY,
+                                clampX(px),
+                                clampY(py),
+                                state.box
+                            );
+                            if (box) setRectFromBox(box, state.box);
                         }
                         this.triggerDraw?.();
                         return true;
@@ -479,6 +578,34 @@ app.registerExtension({
             }
 
             const mpWidget = node.widgets.find((w) => w.name === "max_megapixels");
+            function normalizeAspectWidget() {
+                if (aspectWidget && !ASPECT_RATIO_MAP.has(aspectWidget.value)) {
+                    aspectWidget.value = DEFAULT_ASPECT_RATIO;
+                }
+            }
+            function migrateShiftedWidgetValues() {
+                if (!aspectWidget || ASPECT_RATIO_MAP.has(aspectWidget.value)) return;
+                const shiftedMp = Number(aspectWidget.value);
+                if (Number.isFinite(shiftedMp) && mpWidget && Number(mpWidget.value || 0) === 0) {
+                    mpWidget.value = shiftedMp;
+                }
+                normalizeAspectWidget();
+            }
+            migrateShiftedWidgetValues();
+
+            if (aspectWidget) {
+                const prevAspectCallback = aspectWidget.callback;
+                aspectWidget.callback = function () {
+                    const r = prevAspectCallback?.apply(this, arguments);
+                    normalizeAspectWidget();
+                    fitCurrentRectToAspect();
+                    syncCrop();
+                    editorWidget.triggerDraw?.();
+                    node.setDirtyCanvas(true, true);
+                    return r;
+                };
+            }
+
             if (mpWidget) {
                 const prevMpCallback = mpWidget.callback;
                 mpWidget.callback = function () {
@@ -547,6 +674,7 @@ app.registerExtension({
             const prevOnConfigure = node.onConfigure;
             node.onConfigure = function () {
                 const r = prevOnConfigure?.apply(this, arguments);
+                migrateShiftedWidgetValues();
                 try {
                     const saved = cropWidget.value ? JSON.parse(cropWidget.value) : null;
                     state.rect = saved && saved.w > 0 && saved.h > 0 ? saved : null;
