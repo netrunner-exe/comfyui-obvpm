@@ -43,6 +43,18 @@ function parseImageValue(value) {
     return { filename, type, subfolder };
 }
 
+function imageURL(info) {
+    const route = info.filename.toLowerCase().endsWith(".webp")
+        ? "/obvpm/load_image_crop/preview"
+        : "/view";
+    return api.apiURL(
+        `${route}?filename=${encodeURIComponent(info.filename)}` +
+        `&type=${encodeURIComponent(info.type)}` +
+        `&subfolder=${encodeURIComponent(info.subfolder)}` +
+        `&rand=${Math.random()}`
+    );
+}
+
 app.registerExtension({
     name: "obvpm.load_image_crop",
     async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -636,11 +648,7 @@ app.registerExtension({
                     node.setDirtyCanvas(true, true);
                     return;
                 }
-                const url = api.apiURL(
-                    `/view?filename=${encodeURIComponent(info.filename)}` +
-                    `&type=${info.type}&subfolder=${encodeURIComponent(info.subfolder)}` +
-                    `&rand=${Math.random()}`
-                );
+                const url = imageURL(info);
                 const img = new Image();
                 img.onload = () => {
                     if (seq !== loadSeq) return; // superseded by a newer load

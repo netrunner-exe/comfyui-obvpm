@@ -7,6 +7,7 @@ hidden "crop" string widget as JSON with normalized coordinates
 """
 
 import hashlib
+import io
 import json
 import os
 
@@ -16,6 +17,13 @@ from PIL import Image, ImageOps, ImageSequence
 
 import folder_paths
 import node_helpers
+
+try:
+    from aiohttp import web
+    from server import PromptServer
+except Exception:
+    web = None
+    PromptServer = None
 
 
 ASPECT_RATIOS = [
@@ -30,6 +38,42 @@ ASPECT_RATIOS = [
     "21:9 (Ultrawide)",
 ]
 DEFAULT_ASPECT_RATIO = "Freeform"
+
+
+def _annotated_image_path(filename, file_type="input", subfolder=""):
+    parts = filename.replace("\\", "/").split("/") + subfolder.replace("\\", "/").split("/")
+    if os.path.isabs(filename) or os.path.isabs(subfolder) or ".." in parts:
+        raise ValueError("Invalid image path")
+    rel = os.path.join(subfolder, filename) if subfolder else filename
+    if file_type and file_type != "input":
+        rel = "{} [{}]".format(rel, file_type)
+    return folder_paths.get_annotated_filepath(rel)
+
+
+def _webp_preview_response(path):
+    with node_helpers.pillow(Image.open, path) as img:
+        img.seek(0)
+        frame = node_helpers.pillow(ImageOps.exif_transpose, img).convert("RGBA")
+        data = io.BytesIO()
+        frame.save(data, format="PNG")
+    return web.Response(body=data.getvalue(), content_type="image/png")
+
+
+if PromptServer is not None and web is not None:
+    @PromptServer.instance.routes.get("/obvpm/load_image_crop/preview")
+    async def webp_preview(request):
+        try:
+            filename = request.query.get("filename", "")
+            file_type = request.query.get("type", "input")
+            subfolder = request.query.get("subfolder", "")
+            path = _annotated_image_path(filename, file_type, subfolder)
+            if not path.lower().endswith(".webp"):
+                raise web.HTTPBadRequest(reason="Only WebP previews are handled here")
+            return _webp_preview_response(path)
+        except web.HTTPException:
+            raise
+        except Exception as e:
+            raise web.HTTPBadRequest(reason=str(e))
 
 
 def _parse_crop(crop, width, height):
@@ -51,6 +95,14 @@ def _parse_crop(crop, width, height):
     if x0 == 0 and y0 == 0 and x1 == width and y1 == height:
         return None
     return (x0, y0, x1, y1)
+
+
+def _parse_max_megapixels(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if np.isfinite(value) else 0.0
 
 
 class LoadImageCrop:
@@ -98,6 +150,7 @@ class LoadImageCrop:
         }
 
     def load(self, image, crop="", aspect_ratio=DEFAULT_ASPECT_RATIO, max_megapixels=0.0):
+        max_megapixels = _parse_max_megapixels(max_megapixels)
         image_path = folder_paths.get_annotated_filepath(image)
         img = node_helpers.pillow(Image.open, image_path)
 
@@ -105,7 +158,13 @@ class LoadImageCrop:
         output_masks = []
         w, h = None, None
 
-        for i in ImageSequence.Iterator(img):
+        if (img.format or "").upper() == "WEBP":
+            img.seek(0)
+            frames = [img]
+        else:
+            frames = ImageSequence.Iterator(img)
+
+        for i in frames:
             i = node_helpers.pillow(ImageOps.exif_transpose, i)
 
             frame = i.convert("RGB")
